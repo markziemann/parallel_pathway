@@ -1,0 +1,157 @@
+---
+title: "Testing parallel processing of pathway enrichment analysis"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    fig_width: 7
+    fig_height: 7
+theme: cosmo
+---
+
+Source: TBA
+
+# Intro
+
+How many parallel threads should be used for pathway enrichment analysis?
+
+AMD Ryzen Threadripper 1900X 8-Core Processor (16 parallel threads).
+
+```{r,packages}
+
+library("getDEE2")
+library("DESeq2")
+library("mitch")
+library("fgsea")
+library("tictoc")
+library("RhpcBLASctl")
+library("peakRAM")
+blas_set_num_threads(1)
+
+```
+
+# Get gene expression data
+
+And set up sample sheet.
+
+```{r,loaddata1}
+SRRvec <- c("SRR1171523","SRR1171524","SRR1171525","SRR1171526","SRR1171527","SRR1171528")
+x <- getDEE2("hsapiens", SRRvec, outfile="NULL", counts="GeneCounts", legacy=TRUE)
+
+xg <- x$GeneCounts
+
+head(xg)
+
+ss <- x$MetadataSummary
+ss$trt <- factor(as.numeric(grepl("Treat",ss$Experiment_title)))
+
+```
+
+## Update gene symbols
+
+```{r,updategenesymbols}
+
+gnames <- x$GeneInfo[,1,drop=FALSE]
+xm <- merge(gnames,xg,by=0)
+rownames(xm) <- paste(xm[,1],xm[,2])
+xm[,1] = xm[,2] = NULL
+
+```
+
+## Differential expression
+
+Now run differential expression analysis with DESeq2.
+
+```{r,deseq2}
+
+xmf <- xm[which(rowMeans(xm)>=10),]
+
+dds <- DESeqDataSetFromMatrix(countData = xmf, colData = ss, design = ~ trt )
+res <- DESeq(dds)
+z<- DESeq2::results(res)
+vsd <- vst(dds, blind=FALSE)
+zz<-cbind(z,assay(vsd))
+de<-as.data.frame(zz[order(zz$padj),])
+
+head(de)
+
+```
+
+## Get pathways
+
+```{r,loadpw}
+
+pw <- gmt_import("c5.go.v2023.2.Hs.symbols.gmt")
+
+```
+
+## Mitch
+
+```{r,mitch}
+
+gt <- data.frame(rownames(de))
+gt$g <- sapply(strsplit(gt[,1]," "),"[[",2)
+
+m <- mitch_import(x=de,DEtype="deseq2",geneTable=gt)
+
+corerange <- 1:16
+
+mres <- lapply(corerange, function(cores) {
+  tic()
+  mres <- mitch_calc(x=m,genesets=pw,cores=cores)
+  toc()
+} )
+
+peakRAM(mxres <- mitch_calc(x=m,genesets=pw,cores=1))
+
+mres <- do.call(rbind,lapply(mres,unlist))
+mres <- as.numeric(mres[,2]) - as.numeric(mres[,1])
+names(mres) <- corerange
+
+mres
+
+barplot(mres,ylab="elapsed time in s",xlab="parallel threads", main="mitch")
+
+```
+
+## FGSEA
+
+```{r,fgsea}
+
+f <- as.vector(m[,1])
+names(f) <- rownames(m)
+
+corerange <- 1:16
+
+fres <- lapply(corerange, function(cores) {
+  tic()
+  fgseaRes <- fgsea(pathways = pw,
+                  stats    = f,
+                  minSize  = 10,
+                  nproc=cores)
+  toc()
+} )
+
+peakRAM(fgseaRes <- fgsea(pathways = pw,
+                  stats    = f,
+                  minSize  = 10,
+                  nproc=1))
+
+fres <- do.call(rbind,lapply(fres,unlist))
+fres <- as.numeric(fres[,2]) - as.numeric(fres[,1])
+names(fres) <- corerange
+
+fres
+
+barplot(fres,ylab="elapsed time in s",xlab="parallel threads", main="fgsea")
+
+```
+
+## Session information
+
+```{r,session}
+
+sessionInfo()
+
+```
