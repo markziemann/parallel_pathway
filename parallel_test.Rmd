@@ -37,7 +37,7 @@ blas_set_num_threads(1)
 
 ```{r,deseq2}
 
-download.file("https://ziemann-lab.net/public/fgseatest/de.Rds",
+download.file("https://github.com/markziemann/parallel_pathway/raw/main/de.Rds",
   "de.Rds")
 
 de <- readRDS("de.Rds")
@@ -49,7 +49,7 @@ head(de)
 
 ```{r,loadpw}
 
-download.file("https://ziemann-lab.net/public/fgseatest/c5.go.v2023.2.Hs.symbols.gmt",
+download.file("https://github.com/markziemann/parallel_pathway/raw/main/c5.go.v2023.2.Hs.symbols.gmt",
   "c5.go.v2023.2.Hs.symbols.gmt")
 
 pw <- gmt_import("c5.go.v2023.2.Hs.symbols.gmt")
